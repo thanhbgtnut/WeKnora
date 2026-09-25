@@ -199,7 +199,7 @@ func (s *sessionService) AgentQA(
 	mgr, _, layoutErr := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
 		req.Session.TenantID, sessionID, agentConfig.SandboxConfigID, s.sandboxPolicy,
-		withLiteHostSandbox(s.hostSandbox),
+		withLiteHostSandbox(s.hostSandbox), withLiteDesktop(s.hostDesktop),
 	)
 	layout := sessionWorkspaceLayout(
 		ctx, sessionID, mgr, layoutErr, s.hostSandbox, agentConfig.SandboxConfigID,
@@ -344,6 +344,7 @@ func (s *sessionService) buildAgentConfig(
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:         req.SharedAgentReadOnly,
 	}
+	applyRequestReasoningEffort(req.ReasoningEffort, &agentConfig.Thinking, &agentConfig.ReasoningEffort)
 	// An unset MCP mode means "all" at runtime, but the share scope and the
 	// agent UI both present it as none. A shared run must not hand receivers
 	// every MCP service (with the owner's credentials) that its owner believes
@@ -366,10 +367,18 @@ func (s *sessionService) buildAgentConfig(
 	// because that is where resolveSandboxForExecution reads it; skillsForRun
 	// picks the config the same way the sandbox resolution does.
 	sandboxTenantID, _ := types.TenantIDFromContext(ctx)
-	skillConfigID, tenantSkills := skillsForRun(
-		ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
-		sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
+	var (
+		skillConfigID string
+		tenantSkills  []*types.TenantSkillEntity
 	)
+	if s.hostDesktop {
+		skillConfigID, tenantSkills = hostSkillsForRun(ctx, s.tenantSkillRepo, s.hostSkillTree, sandboxTenantID)
+	} else {
+		skillConfigID, tenantSkills = skillsForRun(
+			ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
+			sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
+		)
+	}
 	agentConfig.TenantSkills = tenantSkills
 	if len(tenantSkills) > 0 {
 		// The config named here is the one the skills came from, which is the
